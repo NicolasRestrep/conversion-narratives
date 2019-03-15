@@ -11,4 +11,117 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Sentiment Analysis 
 
+```{r}
 
+library(tidyverse)
+library(tidytext)
+library(janeaustenr)
+library(stringr)
+library(wordcloud)
+library(reshape2)
+library(stringi)
+library(readxl)
+```
+
+Import the data-set 
+
+```{r}
+
+walkaway_narratives <- read_excel("walkaway_narratives.xlsx")
+
+```
+
+I am going to create new data-sets broken down by individual words. I'm sure there are more efficient ways of doing this. 
+
+```{r, warning=FALSE}
+
+wordsify <- function(x) {
+  
+words_x <- walkaway_narratives[x,] 
+
+data.frame(word = unlist(stri_extract_all_words(stri_trans_tolower(words_x$Text))), 
+                      title = walkaway_narratives[x,1])
+}
+
+list_corpus <- map(1:27, wordsify)
+
+corpus <- bind_rows(list_corpus)
+
+```
+
+Now we have a data-set where every word on each narrative is its own row and we have the appropriate accompanying title. Now, we can provide line numbers so we can identify how the narrative develops 
+
+```{r}
+
+tidy_narratives <- corpus %>% 
+  group_by(Title) %>% 
+  mutate(linenumber = row_number()) %>% 
+  ungroup() 
+```
+
+See how sentiment evolves throughout the narratives 
+
+```{r}
+
+wa_sentiment <- tidy_narratives %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(Title, index = linenumber %/% 10) %>% 
+  summarise(sentiment = sum(score)) %>% 
+  mutate(method = "AFINN")
+
+# Plot the narratives 
+
+wa_sentiment %>% 
+  filter(Title == "Andrea's #WalkAway") %>% 
+  ggplot(aes(index, sentiment)) + 
+  geom_col(show.legend = F)
+
+wa_sentiment %>% 
+  filter(Title == "Trace & Gary's #WalkAway") %>% 
+  ggplot(aes(index, sentiment)) + 
+  geom_col(show.legend = F)
+```
+
+The narratives aren't too long but this can potentially be very useful. 
+
+Maybe we could explore creating some wordclouds
+
+```{r}
+
+tidy_narratives %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  count(word, sentiment, sort = T) %>% 
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>% 
+  comparison.cloud(colors = c("gray20", "gray80"), 
+                   max.words = 100)
+```
+
+Look at that! Conservative is negative and Trump is positive, bang in the middle. 
+
+What are the most common positive and negative words? 
+
+```{r}
+
+bing_words_counts <- tidy_narratives %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  count(word, sentiment, sort = T) %>% 
+  ungroup()
+
+bing_words_counts
+
+# Plot these word counts 
+
+bing_words_counts %>% 
+  group_by(sentiment) %>% 
+  top_n(10) %>% 
+  ungroup() %>% 
+  mutate(word = reorder(word, n)) %>% 
+  ggplot(aes(word, n, fill = sentiment)) + 
+  geom_col(show.legend = F) + 
+  facet_wrap(~sentiment, scales = "free_y") + 
+  labs(y = "Contribution to sentiment", 
+       x = NULL) + 
+  coord_flip()
+```
+
+This is not the most insightful but the code might be interesting. Also, it's very interesting how central Trump is to everything. 
